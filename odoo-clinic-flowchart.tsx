@@ -140,18 +140,22 @@ const FlowchartDiagram = () => {
     );
   };
 
-  // Helper component to display notes on the workflow
+  // Helper component to display notes on the workflow - INSIDE the shape
   const NotesDisplay = ({ step, module }: { step: StepInfo; module: string }) => {
     const data = getStepData(module, step.stepId);
     if (!data.notes) return null;
 
-    // Calculate position below the step
-    const noteY = step.y + (step.height || 60) / 2 + 15;
-    const noteWidth = Math.max(step.width || 180, 150);
-    const noteX = step.x - noteWidth / 2;
-
-    // Split notes into lines (max 40 chars per line, max 3 lines)
-    const maxCharsPerLine = 40;
+    // Calculate position INSIDE the shape
+    const stepHeight = step.height || 60;
+    const stepWidth = step.width || 180;
+    
+    // Position notes at the bottom of the shape, below the main label
+    // Main label is typically at step.y (center), so notes go below center
+    const noteY = step.y + 8; // Below center, inside the shape
+    const maxCharsPerLine = Math.floor((stepWidth - 20) / 6); // Approximate chars per line based on width
+    const maxLines = 2; // Max 2 lines to fit inside
+    
+    // Split notes into lines
     const lines: string[] = [];
     const words = data.notes.split(' ');
     let currentLine = '';
@@ -166,105 +170,73 @@ const FlowchartDiagram = () => {
     });
     if (currentLine) lines.push(currentLine);
     
-    const displayLines = lines.slice(0, 3);
-    const hasMore = lines.length > 3;
-    const lineHeight = 12;
-    const totalHeight = displayLines.length * lineHeight + 8;
+    const displayLines = lines.slice(0, maxLines);
+    const hasMore = lines.length > maxLines;
+    const lineHeight = 10;
 
     return (
       <g>
-        {/* Background box for notes */}
-        <rect
-          x={noteX - 5}
-          y={noteY - 8}
-          width={noteWidth + 10}
-          height={totalHeight}
-          fill="#fef3c7"
-          stroke="#f59e0b"
-          strokeWidth="1"
-          rx="4"
-          opacity="0.95"
-          className="cursor-pointer"
-          onClick={() => handleStepClick(step)}
-        />
-        {/* Notes text - multi-line */}
+        {/* Notes text - displayed INSIDE the shape at the bottom */}
         {displayLines.map((line, index) => (
           <text
             key={index}
             x={step.x}
-            y={noteY + 4 + (index * lineHeight)}
+            y={noteY + (index * lineHeight)}
             textAnchor="middle"
             fill="#92400e"
-            fontSize="10"
+            fontSize="9"
             fontWeight="500"
             className="cursor-pointer"
             onClick={() => handleStepClick(step)}
+            style={{ pointerEvents: 'all' }}
           >
-            {index === 0 ? '📝 ' : ''}{line}
+            {index === 0 ? '📝 ' : ''}{line.length > maxCharsPerLine ? line.substring(0, maxCharsPerLine - 3) + '...' : line}
           </text>
         ))}
         {hasMore && (
           <text
             x={step.x}
-            y={noteY + 4 + (displayLines.length * lineHeight)}
+            y={noteY + displayLines.length * lineHeight}
             textAnchor="middle"
             fill="#92400e"
-            fontSize="9"
+            fontSize="8"
             fontStyle="italic"
             className="cursor-pointer"
             onClick={() => handleStepClick(step)}
           >
-            ... (click to see more)
+            ...more
           </text>
         )}
       </g>
     );
   };
 
-  // Helper component to display deadline on the workflow
+  // Helper component to display deadline on the workflow - INSIDE the shape
   const DeadlineDisplay = ({ step, module }: { step: StepInfo; module: string }) => {
     const data = getStepData(module, step.stepId);
     if (!data.deadline) return null;
-    
-    // Debug log (remove in production)
-    console.log(`DeadlineDisplay for ${module}-${step.stepId}:`, data);
 
     const overdue = isOverdue(data.deadline);
     const deadlineDate = new Date(data.deadline);
-    const formattedDate = deadlineDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const formattedDate = deadlineDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-    // Calculate position - show above the step if there are notes, otherwise below
-    const hasNotes = !!data.notes;
-    const deadlineY = hasNotes 
-      ? step.y - (step.height || 60) / 2 - 20
-      : step.y + (step.height || 60) / 2 + 15;
-    const deadlineWidth = Math.max(step.width || 180, 150);
-    const deadlineX = step.x - deadlineWidth / 2;
+    // Calculate position INSIDE the shape - at the top, above the main label
+    // Main label is typically at step.y (center), so deadline goes above center
+    const deadlineY = step.y - 12; // Above center, inside the shape
 
     return (
       <g>
-        {/* Background box for deadline */}
-        <rect
-          x={deadlineX - 5}
-          y={deadlineY - 8}
-          width={deadlineWidth + 10}
-          height={20}
-          fill={overdue ? "#fee2e2" : "#fef3c7"}
-          stroke={overdue ? "#ef4444" : "#f59e0b"}
-          strokeWidth="1"
-          rx="4"
-          opacity="0.95"
-        />
-        {/* Deadline text */}
+        {/* Deadline text - displayed INSIDE the shape at the top */}
         <text
           x={step.x}
-          y={deadlineY + 4}
+          y={deadlineY}
           textAnchor="middle"
           fill={overdue ? "#991b1b" : "#92400e"}
-          fontSize="10"
+          fontSize="9"
           fontWeight="600"
           className="cursor-pointer"
           onClick={() => handleStepClick(step)}
+          style={{ pointerEvents: 'all' }}
         >
           📅 {overdue ? '⚠️ ' : ''}{formattedDate}
         </text>
