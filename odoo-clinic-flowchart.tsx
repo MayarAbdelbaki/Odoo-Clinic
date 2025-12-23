@@ -24,18 +24,30 @@ const FlowchartDiagram = () => {
 
   // Load data from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('workflowStepData');
-    if (saved) {
-      setStepData(JSON.parse(saved));
+    try {
+      const saved = localStorage.getItem('workflowStepData');
+      if (saved) {
+        const parsedData = JSON.parse(saved);
+        if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length > 0) {
+          console.log('Loading data from localStorage:', parsedData);
+          setStepData(parsedData);
+        } else {
+          console.log('No valid data found in localStorage');
+        }
+      } else {
+        console.log('No saved data found in localStorage');
+      }
+    } catch (error) {
+      console.error('Error loading from localStorage:', error);
     }
   }, []);
 
-  // Save data to localStorage whenever stepData changes
+  // Save data to localStorage whenever stepData changes (automatic persistence)
   useEffect(() => {
     try {
       const dataToSave = JSON.stringify(stepData);
       localStorage.setItem('workflowStepData', dataToSave);
-      console.log('StepData updated, saved to localStorage:', stepData);
+      console.log('Data automatically saved:', stepData);
     } catch (error) {
       console.error('Failed to save to localStorage:', error);
     }
@@ -95,9 +107,15 @@ const FlowchartDiagram = () => {
     setNotesInput('');
   };
 
+
   const getStepData = (module: string, stepId: string): StepData => {
     const key = getStepKey(module, stepId);
-    return stepData[key] || {};
+    const data = stepData[key] || {};
+    // Debug: log when data is retrieved
+    if (data.deadline || data.notes) {
+      console.log(`Getting data for ${key}:`, data);
+    }
+    return data;
   };
 
   const isOverdue = (deadline: string): boolean => {
@@ -140,106 +158,245 @@ const FlowchartDiagram = () => {
     );
   };
 
-  // Helper component to display notes on the workflow - INSIDE the shape
+  // Helper component to display notes on the workflow - NEXT TO the shape (right side)
   const NotesDisplay = ({ step, module }: { step: StepInfo; module: string }) => {
     const data = getStepData(module, step.stepId);
-    if (!data.notes) return null;
-
-    // Calculate position INSIDE the shape
-    const stepHeight = step.height || 60;
-    const stepWidth = step.width || 180;
     
-    // Position notes at the bottom of the shape, below the main label
-    // Main label is typically at step.y (center), so notes go below center
-    const noteY = step.y + 8; // Below center, inside the shape
-    const maxCharsPerLine = Math.floor((stepWidth - 20) / 6); // Approximate chars per line based on width
-    const maxLines = 2; // Max 2 lines to fit inside
+    if (!data.notes || !data.notes.trim()) return null;
+
+    const stepWidth = step.width || 180;
+    const stepHeight = step.height || 60;
+    
+    // Position notes to the RIGHT of the shape
+    const noteBoxX = step.x + stepWidth / 2 + 15; // Right side of shape + spacing
+    const noteBoxY = step.y - stepHeight / 2; // Align with top of shape
+    const noteBoxWidth = 200; // Fixed width for professional look
+    const maxLines = 4; // More lines for better readability
+    const lineHeight = 14;
+    const padding = 10;
     
     // Split notes into lines
     const lines: string[] = [];
-    const words = data.notes.split(' ');
+    const words = data.notes.trim().split(/\s+/);
     let currentLine = '';
+    const maxCharsPerLine = 35; // Characters per line
     
     words.forEach(word => {
-      if ((currentLine + word).length <= maxCharsPerLine) {
-        currentLine = currentLine ? currentLine + ' ' + word : word;
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (testLine.length <= maxCharsPerLine) {
+        currentLine = testLine;
       } else {
         if (currentLine) lines.push(currentLine);
-        currentLine = word;
+        currentLine = word.length > maxCharsPerLine ? word.substring(0, maxCharsPerLine - 3) + '...' : word;
       }
     });
     if (currentLine) lines.push(currentLine);
     
     const displayLines = lines.slice(0, maxLines);
     const hasMore = lines.length > maxLines;
-    const lineHeight = 10;
+    const totalHeight = displayLines.length * lineHeight + padding * 2;
 
     return (
       <g>
-        {/* Notes text - displayed INSIDE the shape at the bottom */}
+        {/* Professional note card with shadow effect */}
+        <defs>
+          <filter id="noteShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dx="2" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.3"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        
+        {/* Background card */}
+        <rect
+          x={noteBoxX}
+          y={noteBoxY}
+          width={noteBoxWidth}
+          height={totalHeight}
+          fill="#ffffff"
+          stroke="#e5e7eb"
+          strokeWidth="1.5"
+          rx="6"
+          filter="url(#noteShadow)"
+          className="cursor-pointer"
+          onClick={() => handleStepClick(step)}
+        />
+        
+        {/* Left border accent */}
+        <rect
+          x={noteBoxX}
+          y={noteBoxY}
+          width="4"
+          height={totalHeight}
+          fill="#3b82f6"
+          rx="6"
+        />
+        
+        {/* Header */}
+        <text
+          x={noteBoxX + padding + 20}
+          y={noteBoxY + padding + 12}
+          fill="#1f2937"
+          fontSize="11"
+          fontWeight="700"
+          fontFamily="system-ui, -apple-system, sans-serif"
+        >
+          Notes
+        </text>
+        
+        {/* Notes text */}
         {displayLines.map((line, index) => (
           <text
             key={index}
-            x={step.x}
-            y={noteY + (index * lineHeight)}
-            textAnchor="middle"
-            fill="#92400e"
-            fontSize="9"
-            fontWeight="500"
+            x={noteBoxX + padding + 20}
+            y={noteBoxY + padding + 28 + (index * lineHeight)}
+            fill="#4b5563"
+            fontSize="11"
+            fontWeight="400"
+            fontFamily="system-ui, -apple-system, sans-serif"
             className="cursor-pointer"
             onClick={() => handleStepClick(step)}
-            style={{ pointerEvents: 'all' }}
           >
-            {index === 0 ? '📝 ' : ''}{line.length > maxCharsPerLine ? line.substring(0, maxCharsPerLine - 3) + '...' : line}
+            {line}
           </text>
         ))}
+        
         {hasMore && (
           <text
-            x={step.x}
-            y={noteY + displayLines.length * lineHeight}
-            textAnchor="middle"
-            fill="#92400e"
-            fontSize="8"
+            x={noteBoxX + padding + 20}
+            y={noteBoxY + padding + 28 + displayLines.length * lineHeight}
+            fill="#9ca3af"
+            fontSize="10"
             fontStyle="italic"
+            fontFamily="system-ui, -apple-system, sans-serif"
             className="cursor-pointer"
             onClick={() => handleStepClick(step)}
           >
-            ...more
+            ... (click to see more)
           </text>
         )}
+        
+        {/* Connecting line to shape */}
+        <line
+          x1={step.x + stepWidth / 2}
+          y1={step.y}
+          x2={noteBoxX}
+          y2={noteBoxY + totalHeight / 2}
+          stroke="#d1d5db"
+          strokeWidth="1.5"
+          strokeDasharray="4,4"
+        />
       </g>
     );
   };
 
-  // Helper component to display deadline on the workflow - INSIDE the shape
+  // Helper component to display deadline on the workflow - NEXT TO the shape (left side)
   const DeadlineDisplay = ({ step, module }: { step: StepInfo; module: string }) => {
     const data = getStepData(module, step.stepId);
     if (!data.deadline) return null;
 
     const overdue = isOverdue(data.deadline);
     const deadlineDate = new Date(data.deadline);
-    const formattedDate = deadlineDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const formattedDate = deadlineDate.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
+    });
 
-    // Calculate position INSIDE the shape - at the top, above the main label
-    // Main label is typically at step.y (center), so deadline goes above center
-    const deadlineY = step.y - 12; // Above center, inside the shape
+    const stepWidth = step.width || 180;
+    const stepHeight = step.height || 60;
+    
+    // Position deadline to the LEFT of the shape
+    const deadlineBoxWidth = 160;
+    const deadlineBoxX = step.x - stepWidth / 2 - deadlineBoxWidth - 15; // Left side of shape - spacing
+    const deadlineBoxY = step.y - stepHeight / 2; // Align with top of shape
+    const deadlineBoxHeight = 50;
+    const padding = 10;
 
     return (
       <g>
-        {/* Deadline text - displayed INSIDE the shape at the top */}
-        <text
-          x={step.x}
-          y={deadlineY}
-          textAnchor="middle"
-          fill={overdue ? "#991b1b" : "#92400e"}
-          fontSize="9"
-          fontWeight="600"
+        {/* Professional deadline card with shadow effect */}
+        <defs>
+          <filter id="deadlineShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dx="2" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.3"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        
+        {/* Background card */}
+        <rect
+          x={deadlineBoxX}
+          y={deadlineBoxY}
+          width={deadlineBoxWidth}
+          height={deadlineBoxHeight}
+          fill="#ffffff"
+          stroke={overdue ? "#ef4444" : "#e5e7eb"}
+          strokeWidth="1.5"
+          rx="6"
+          filter="url(#deadlineShadow)"
           className="cursor-pointer"
           onClick={() => handleStepClick(step)}
-          style={{ pointerEvents: 'all' }}
+        />
+        
+        {/* Left border accent - red if overdue, blue if normal */}
+        <rect
+          x={deadlineBoxX}
+          y={deadlineBoxY}
+          width="4"
+          height={deadlineBoxHeight}
+          fill={overdue ? "#ef4444" : "#3b82f6"}
+          rx="6"
+        />
+        
+        {/* Icon and label */}
+        <text
+          x={deadlineBoxX + padding + 8}
+          y={deadlineBoxY + padding + 12}
+          fill="#1f2937"
+          fontSize="10"
+          fontWeight="600"
+          fontFamily="system-ui, -apple-system, sans-serif"
         >
-          📅 {overdue ? '⚠️ ' : ''}{formattedDate}
+          {overdue ? '⚠️' : '📅'} Deadline
         </text>
+        
+        {/* Date */}
+        <text
+          x={deadlineBoxX + padding + 8}
+          y={deadlineBoxY + padding + 26}
+          fill={overdue ? "#dc2626" : "#059669"}
+          fontSize="12"
+          fontWeight="700"
+          fontFamily="system-ui, -apple-system, sans-serif"
+          className="cursor-pointer"
+          onClick={() => handleStepClick(step)}
+        >
+          {formattedDate}
+        </text>
+        
+        {/* Connecting line to shape */}
+        <line
+          x1={step.x - stepWidth / 2}
+          y1={step.y}
+          x2={deadlineBoxX + deadlineBoxWidth}
+          y2={deadlineBoxY + deadlineBoxHeight / 2}
+          stroke="#d1d5db"
+          strokeWidth="1.5"
+          strokeDasharray="4,4"
+        />
       </g>
     );
   };
@@ -252,14 +409,16 @@ const FlowchartDiagram = () => {
   }: { 
     children: React.ReactNode; 
     step: StepInfo; 
-    module: string;
+    module?: string;
   }) => {
+    // Use module from prop or from step object
+    const stepModule = module || step.module;
     return (
       <g>
         {children}
-        <StepBadge step={step} module={module} />
-        <DeadlineDisplay step={step} module={module} />
-        <NotesDisplay step={step} module={module} />
+        <StepBadge step={step} module={stepModule} />
+        <DeadlineDisplay step={step} module={stepModule} />
+        <NotesDisplay step={step} module={stepModule} />
         <foreignObject 
           x={step.x - (step.width || 180) / 2} 
           y={step.y - (step.height || 60) / 2} 
@@ -279,8 +438,10 @@ const FlowchartDiagram = () => {
   // Main workflow
   const MainFlow = () => {
     const module = 'main';
+    // Access stepData to ensure component re-renders when it changes
+    void stepData; // This ensures the component re-renders when stepData changes
     return (
-      <svg width="800" height="1100" className="mx-auto">
+      <svg width="1200" height="1100" className="mx-auto" viewBox="0 0 1200 1100" preserveAspectRatio="xMidYMid meet">
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
             <polygon points="0 0, 10 3, 0 6" fill="#1e40af" />
@@ -926,6 +1087,7 @@ const FlowchartDiagram = () => {
             🏥 Odoo Clinic Management System
           </h1>
           <p className="text-gray-600 text-center mb-6">Complete Workflow Diagram</p>
+          <p className="text-xs text-green-600 text-center mb-4">✓ Your deadlines and notes are automatically saved</p>
           
           {/* Module Navigation */}
           <div className="flex flex-wrap gap-2 justify-center mb-6">
@@ -989,8 +1151,8 @@ const FlowchartDiagram = () => {
         </div>
 
         {/* Flowchart Display */}
-        <div className="bg-white rounded-lg shadow-xl p-6 overflow-x-auto relative" key={`flow-container-${selectedModule}-${Object.keys(stepData).length}`}>
-          <CurrentFlow />
+        <div className="bg-white rounded-lg shadow-xl p-6 overflow-x-auto relative">
+          <CurrentFlow key={`flow-${selectedModule}-${JSON.stringify(stepData)}`} />
         </div>
 
         {/* Edit Modal */}
