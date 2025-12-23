@@ -5,6 +5,15 @@ interface StepData {
   notes?: string;
 }
 
+interface SubRectangle {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  deadline?: string;
+  notes?: string;
+}
+
 interface StepInfo {
   module: string;
   stepId: string;
@@ -18,9 +27,15 @@ interface StepInfo {
 const FlowchartDiagram = () => {
   const [selectedModule, setSelectedModule] = useState('main');
   const [stepData, setStepData] = useState<Record<string, StepData>>({});
+  const [subRectangles, setSubRectangles] = useState<Record<string, SubRectangle[]>>({});
   const [editingStep, setEditingStep] = useState<StepInfo | null>(null);
   const [deadlineInput, setDeadlineInput] = useState('');
   const [notesInput, setNotesInput] = useState('');
+  const [editingSubRect, setEditingSubRect] = useState<{stepKey: string, subRect: SubRectangle | null} | null>(null);
+  const [subRectLabel, setSubRectLabel] = useState('');
+  const [subRectDeadline, setSubRectDeadline] = useState('');
+  const [subRectNotes, setSubRectNotes] = useState('');
+  const [draggingSubRect, setDraggingSubRect] = useState<{stepKey: string, id: string, offsetX: number, offsetY: number} | null>(null);
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -37,6 +52,14 @@ const FlowchartDiagram = () => {
       } else {
         console.log('No saved data found in localStorage');
       }
+      
+      const savedSubRects = localStorage.getItem('workflowSubRectangles');
+      if (savedSubRects) {
+        const parsedSubRects = JSON.parse(savedSubRects);
+        if (parsedSubRects && typeof parsedSubRects === 'object') {
+          setSubRectangles(parsedSubRects);
+        }
+      }
     } catch (error) {
       console.error('Error loading from localStorage:', error);
     }
@@ -52,6 +75,16 @@ const FlowchartDiagram = () => {
       console.error('Failed to save to localStorage:', error);
     }
   }, [stepData]);
+
+  // Save sub-rectangles to localStorage
+  useEffect(() => {
+    try {
+      const dataToSave = JSON.stringify(subRectangles);
+      localStorage.setItem('workflowSubRectangles', dataToSave);
+    } catch (error) {
+      console.error('Failed to save sub-rectangles to localStorage:', error);
+    }
+  }, [subRectangles]);
 
   const getStepKey = (module: string, stepId: string) => `${module}-${stepId}`;
 
@@ -105,6 +138,150 @@ const FlowchartDiagram = () => {
     setEditingStep(null);
     setDeadlineInput('');
     setNotesInput('');
+  };
+
+  const handleAddSubRect = (stepKey: string, subRect?: SubRectangle) => {
+    setEditingSubRect({ stepKey, subRect: subRect || null });
+    setSubRectLabel(subRect?.label || '');
+    setSubRectDeadline(subRect?.deadline || '');
+    setSubRectNotes(subRect?.notes || '');
+  };
+
+  const getSubRectKey = (stepKey: string, subRectId: string) => `${stepKey}-sub-${subRectId}`;
+
+  const getSubRectData = (stepKey: string, subRectId: string): StepData => {
+    const key = getSubRectKey(stepKey, subRectId);
+    return stepData[key] || {};
+  };
+
+  const handleSaveSubRect = () => {
+    if (!editingSubRect || !subRectLabel.trim()) return;
+    
+    const stepKey = editingSubRect.stepKey;
+    const existing = subRectangles[stepKey] || [];
+    const subRectKey = editingSubRect.subRect 
+      ? getSubRectKey(stepKey, editingSubRect.subRect.id)
+      : null;
+    
+    // Save notes and deadline for sub-rectangle
+    if (subRectKey) {
+      const newSubRectData: StepData = {};
+      if (subRectDeadline && subRectDeadline.trim() !== '') {
+        newSubRectData.deadline = subRectDeadline.trim();
+      }
+      if (subRectNotes && subRectNotes.trim() !== '') {
+        newSubRectData.notes = subRectNotes.trim();
+      }
+      
+      setStepData(prev => {
+        const updated = { ...prev };
+        if (!newSubRectData.deadline && !newSubRectData.notes) {
+          delete updated[subRectKey];
+        } else {
+          updated[subRectKey] = newSubRectData;
+        }
+        return updated;
+      });
+    }
+    
+    if (editingSubRect.subRect) {
+      // Update existing
+      setSubRectangles(prev => ({
+        ...prev,
+        [stepKey]: existing.map(sr => 
+          sr.id === editingSubRect!.subRect!.id 
+            ? { ...sr, label: subRectLabel.trim(), deadline: subRectDeadline.trim() || undefined, notes: subRectNotes.trim() || undefined }
+            : sr
+        )
+      }));
+    } else {
+      // Add new - position next to main rectangle (default position, user can drag)
+      const newSubRect: SubRectangle = {
+        id: Date.now().toString(),
+        label: subRectLabel.trim(),
+        x: 600 + (existing.length * 200), // Default position, will be adjusted in component
+        y: 400 + (existing.length * 80),
+        deadline: subRectDeadline.trim() || undefined,
+        notes: subRectNotes.trim() || undefined
+      };
+      
+      // Save notes and deadline
+      const newKey = getSubRectKey(stepKey, newSubRect.id);
+      const newSubRectData: StepData = {};
+      if (subRectDeadline && subRectDeadline.trim() !== '') {
+        newSubRectData.deadline = subRectDeadline.trim();
+      }
+      if (subRectNotes && subRectNotes.trim() !== '') {
+        newSubRectData.notes = subRectNotes.trim();
+      }
+      if (newSubRectData.deadline || newSubRectData.notes) {
+        setStepData(prev => ({ ...prev, [newKey]: newSubRectData }));
+      }
+      
+      setSubRectangles(prev => ({
+        ...prev,
+        [stepKey]: [...existing, newSubRect]
+      }));
+    }
+    
+    setEditingSubRect(null);
+    setSubRectLabel('');
+    setSubRectDeadline('');
+    setSubRectNotes('');
+  };
+
+  const handleDeleteSubRect = (stepKey: string, subRectId: string) => {
+    setSubRectangles(prev => {
+      const existing = prev[stepKey] || [];
+      const updated = existing.filter(sr => sr.id !== subRectId);
+      if (updated.length === 0) {
+        const newData = { ...prev };
+        delete newData[stepKey];
+        return newData;
+      }
+      return { ...prev, [stepKey]: updated };
+    });
+  };
+
+  const getSubRectangles = (stepKey: string): SubRectangle[] => {
+    return subRectangles[stepKey] || [];
+  };
+
+  const handleSubRectDragStart = (e: React.MouseEvent, stepKey: string, subRectId: string, currentX: number, currentY: number) => {
+    e.stopPropagation();
+    const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
+    if (!svg) return;
+    
+    const svgRect = svg.getBoundingClientRect();
+    const offsetX = e.clientX - svgRect.left - currentX;
+    const offsetY = e.clientY - svgRect.top - currentY;
+    
+    setDraggingSubRect({ stepKey, id: subRectId, offsetX, offsetY });
+  };
+
+  const handleSubRectDrag = (e: React.MouseEvent) => {
+    if (!draggingSubRect) return;
+    
+    const svg = (e.currentTarget as SVGSVGElement);
+    const svgRect = svg.getBoundingClientRect();
+    const newX = e.clientX - svgRect.left - draggingSubRect.offsetX;
+    const newY = e.clientY - svgRect.top - draggingSubRect.offsetY;
+    
+    setSubRectangles(prev => {
+      const existing = prev[draggingSubRect.stepKey] || [];
+      return {
+        ...prev,
+        [draggingSubRect.stepKey]: existing.map(sr =>
+          sr.id === draggingSubRect.id
+            ? { ...sr, x: Math.max(0, newX), y: Math.max(0, newY) }
+            : sr
+        )
+      };
+    });
+  };
+
+  const handleSubRectDragEnd = () => {
+    setDraggingSubRect(null);
   };
 
 
@@ -1065,6 +1242,385 @@ const FlowchartDiagram = () => {
     );
   };
 
+  // Helper component for draggable sub-rectangles
+  const DraggableSubRect = ({ 
+    subRect, 
+    stepKey, 
+    onEdit, 
+    onDelete 
+  }: { 
+    subRect: SubRectangle; 
+    stepKey: string; 
+    onEdit: () => void;
+    onDelete: () => void;
+  }) => {
+    const subData = getSubRectData(stepKey, subRect.id);
+    const hasData = subData.deadline || subData.notes;
+    const overdue = subData.deadline && isOverdue(subData.deadline);
+    
+    return (
+      <g>
+        {/* Sub-rectangle */}
+        <g
+          onMouseDown={(e) => handleSubRectDragStart(e, stepKey, subRect.id, subRect.x, subRect.y)}
+          style={{ cursor: 'move' }}
+        >
+          <rect
+            x={subRect.x}
+            y={subRect.y}
+            width="160"
+            height="50"
+            fill={hasData ? (overdue ? "#fee2e2" : "#fef3c7") : "#e0e7ff"}
+            stroke={overdue ? "#ef4444" : "#6366f1"}
+            strokeWidth="2"
+            rx="6"
+            className="hover:opacity-80 transition-opacity"
+          />
+          <text
+            x={subRect.x + 80}
+            y={subRect.y + 20}
+            textAnchor="middle"
+            fill={overdue ? "#991b1b" : "#1e40af"}
+            fontSize="11"
+            fontWeight="600"
+          >
+            {subRect.label}
+          </text>
+          {hasData && (
+            <text
+              x={subRect.x + 80}
+              y={subRect.y + 35}
+              textAnchor="middle"
+              fill={overdue ? "#dc2626" : "#059669"}
+              fontSize="9"
+            >
+              {subData.deadline ? `📅 ${new Date(subData.deadline).toLocaleDateString()}` : '📝'}
+            </text>
+          )}
+        </g>
+        
+        {/* Badge indicator - clickable for editing */}
+        {hasData && (
+          <foreignObject x={subRect.x + 140} y={subRect.y - 8} width="20" height="20">
+            <div
+              className={`w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center cursor-pointer ${
+                overdue
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : subData.deadline
+                  ? 'bg-yellow-400 text-gray-800'
+                  : 'bg-blue-400 text-white'
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+            >
+              {subData.deadline ? '📅' : '📝'}
+            </div>
+          </foreignObject>
+        )}
+        
+        {/* Clickable area for editing - double click to edit */}
+        <rect
+          x={subRect.x}
+          y={subRect.y}
+          width="160"
+          height="50"
+          fill="transparent"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          className="cursor-pointer"
+        />
+        
+        {/* Delete button */}
+        <foreignObject x={subRect.x + 130} y={subRect.y + 5} width="25" height="20">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="w-full h-full bg-red-500 text-white rounded text-xs hover:bg-red-600"
+            title="Delete"
+          >
+            ×
+          </button>
+        </foreignObject>
+      </g>
+    );
+  };
+
+  // Flutter App Flow - Redesigned
+  const FlutterAppFlow = () => {
+    const module = 'flutter';
+    void stepData; // Ensure re-render on data change
+    
+    // Center all shapes - SVG width is 1400, center is at 700
+    const centerX = 700;
+    const steps: StepInfo[] = [
+      { module, stepId: 'ui-ux', label: 'UI/UX', x: centerX - 80, y: 80, width: 160, height: 70 },
+      { module, stepId: 'figma', label: 'Figma Design', x: centerX - 80, y: 200, width: 160, height: 70 },
+      { module, stepId: 'client-review', label: 'Client Review', x: centerX - 80, y: 320, width: 160, height: 70 },
+      { module, stepId: 'flutter-screens', label: 'Flutter Creating Screens', x: centerX - 90, y: 480, width: 180, height: 80 },
+      { module, stepId: 'backend-apis', label: 'Backend APIs', x: centerX - 90, y: 620, width: 180, height: 80 },
+      { module, stepId: 'erd', label: 'ERD Database', x: centerX - 80, y: 760, width: 160, height: 70 },
+      { module, stepId: 'collab', label: 'Frontend & Backend Collab', x: centerX - 100, y: 880, width: 200, height: 70 },
+      { module, stepId: 'decision', label: 'If okay?', x: centerX - 60, y: 1000, width: 120, height: 80 },
+      { module, stepId: 'version1', label: 'Version 1', x: centerX - 80, y: 1120, width: 160, height: 70 }
+    ];
+
+    const flutterScreensKey = getStepKey(module, 'flutter-screens');
+    const backendApisKey = getStepKey(module, 'backend-apis');
+    const flutterSubRects = getSubRectangles(flutterScreensKey);
+    const backendSubRects = getSubRectangles(backendApisKey);
+    
+    // Initialize default positions for new sub-rectangles if needed
+    useEffect(() => {
+      const mainStep = steps.find(s => getStepKey(s.module, s.stepId) === flutterScreensKey);
+      if (mainStep && flutterSubRects.length > 0) {
+        const needsInit = flutterSubRects.some(sr => sr.x === 0 && sr.y === 0);
+        if (needsInit) {
+          setSubRectangles(prev => {
+            const updated = prev[flutterScreensKey]?.map((sr, idx) => 
+              (sr.x === 0 && sr.y === 0) 
+                ? { ...sr, x: mainStep.x + (mainStep.width || 180) + 30, y: mainStep.y + (idx * 90) }
+                : sr
+            ) || [];
+            return { ...prev, [flutterScreensKey]: updated };
+          });
+        }
+      }
+      
+      const backendStep = steps.find(s => getStepKey(s.module, s.stepId) === backendApisKey);
+      if (backendStep && backendSubRects.length > 0) {
+        const needsInit = backendSubRects.some(sr => sr.x === 0 && sr.y === 0);
+        if (needsInit) {
+          setSubRectangles(prev => {
+            const updated = prev[backendApisKey]?.map((sr, idx) => 
+              (sr.x === 0 && sr.y === 0) 
+                ? { ...sr, x: backendStep.x + (backendStep.width || 180) + 30, y: backendStep.y + (idx * 90) }
+                : sr
+            ) || [];
+            return { ...prev, [backendApisKey]: updated };
+          });
+        }
+      }
+    }, [flutterSubRects.length, backendSubRects.length]);
+    
+    const maxHeight = Math.max(1200, 1120 + (Math.max(flutterSubRects.length, backendSubRects.length) * 100));
+    
+    return (
+      <svg 
+        width="1400" 
+        height={maxHeight} 
+        className="mx-auto" 
+        viewBox={`0 0 1400 ${maxHeight}`} 
+        preserveAspectRatio="xMidYMid meet"
+        onMouseMove={handleSubRectDrag}
+        onMouseUp={handleSubRectDragEnd}
+        onMouseLeave={handleSubRectDragEnd}
+      >
+        <defs>
+          <marker id="arrowhead-flutter" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <polygon points="0 0, 10 3, 0 6" fill="#6366f1" />
+          </marker>
+          <linearGradient id="mainGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#818cf8" stopOpacity="1" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="1" />
+          </linearGradient>
+          <filter id="shadow">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+            <feOffset dx="2" dy="2" result="offsetblur"/>
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.3"/>
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* UI/UX - Start */}
+        <ClickableStep step={steps[0]} module={module}>
+          <ellipse cx={steps[0].x + steps[0].width! / 2} cy={steps[0].y} rx={steps[0].width! / 2} ry="25" fill="url(#mainGradient)" stroke="#4f46e5" strokeWidth="2.5" filter="url(#shadow)"/>
+          <text x={steps[0].x + steps[0].width! / 2} y={steps[0].y + 5} textAnchor="middle" fill="white" fontWeight="bold" fontSize="15">UI/UX</text>
+        </ClickableStep>
+
+        {/* Arrow */}
+        <line x1={steps[0].x + steps[0].width! / 2} y1={steps[0].y + 25} x2={steps[0].x + steps[0].width! / 2} y2={steps[1].y - 35} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Figma Design */}
+        <ClickableStep step={steps[1]} module={module}>
+          <rect x={steps[1].x} y={steps[1].y - 35} width={steps[1].width} height={steps[1].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[1].x + steps[1].width! / 2} y={steps[1].y + 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="14">Figma Design</text>
+        </ClickableStep>
+
+        {/* Arrow */}
+        <line x1={steps[1].x + steps[1].width! / 2} y1={steps[1].y + 35} x2={steps[1].x + steps[1].width! / 2} y2={steps[2].y - 35} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Client Review */}
+        <ClickableStep step={steps[2]} module={module}>
+          <rect x={steps[2].x} y={steps[2].y - 35} width={steps[2].width} height={steps[2].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[2].x + steps[2].width! / 2} y={steps[2].y + 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="14">Client Review</text>
+        </ClickableStep>
+
+        {/* Loop from Client Review back to Figma Design */}
+        <path
+          d={`M ${steps[2].x + steps[2].width!} ${steps[2].y} 
+              Q ${steps[2].x + steps[2].width! + 100} ${steps[2].y - 60} 
+                ${steps[1].x + steps[1].width!} ${steps[1].y}`}
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="2.5"
+          markerEnd="url(#arrowhead-flutter)"
+        />
+        <text 
+          x={steps[2].x + steps[2].width! + 50} 
+          y={steps[2].y - 40} 
+          fill="#f59e0b" 
+          fontSize="12" 
+          fontWeight="600"
+        >
+          Revisions
+        </text>
+        
+        {/* Loop from Figma Design to Client Review (feedback) */}
+        <path
+          d={`M ${steps[1].x + steps[1].width!} ${steps[1].y} 
+              Q ${steps[1].x + steps[1].width! + 100} ${steps[1].y + 60} 
+                ${steps[2].x + steps[2].width!} ${steps[2].y}`}
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="2.5"
+          markerEnd="url(#arrowhead-flutter)"
+        />
+        <text 
+          x={steps[1].x + steps[1].width! + 50} 
+          y={steps[1].y + 40} 
+          fill="#f59e0b" 
+          fontSize="12" 
+          fontWeight="600"
+        >
+          Feedback
+        </text>
+
+        {/* Arrow */}
+        <line x1={steps[2].x + steps[2].width! / 2} y1={steps[2].y + 35} x2={steps[2].x + steps[2].width! / 2} y2={steps[3].y - 40} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Flutter Creating Screens - Main Rectangle */}
+        <ClickableStep step={steps[3]} module={module}>
+          <rect x={steps[3].x} y={steps[3].y - 40} width={steps[3].width} height={steps[3].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[3].x + steps[3].width! / 2} y={steps[3].y - 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">Flutter Creating</text>
+          <text x={steps[3].x + steps[3].width! / 2} y={steps[3].y + 15} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">Screens</text>
+        </ClickableStep>
+        
+        {/* Sub-rectangles positioned next to main rectangle */}
+        {flutterSubRects.map((subRect, index) => (
+          <g key={subRect.id}>
+            <DraggableSubRect
+              subRect={subRect}
+              stepKey={flutterScreensKey}
+              onEdit={() => handleAddSubRect(flutterScreensKey, subRect)}
+              onDelete={() => handleDeleteSubRect(flutterScreensKey, subRect.id)}
+            />
+            {/* Arrow to next sub-rectangle */}
+            {index < flutterSubRects.length - 1 && (
+              <line
+                x1={subRect.x + 80}
+                y1={subRect.y + 50}
+                x2={flutterSubRects[index + 1].x + 80}
+                y2={flutterSubRects[index + 1].y}
+                stroke="#6366f1"
+                strokeWidth="2"
+                markerEnd="url(#arrowhead-flutter)"
+              />
+            )}
+          </g>
+        ))}
+        
+        {/* Arrow */}
+        <line x1={steps[3].x + steps[3].width! / 2} y1={steps[3].y + 40} x2={steps[3].x + steps[3].width! / 2} y2={steps[4].y - 40} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Backend APIs - Main Rectangle */}
+        <ClickableStep step={steps[4]} module={module}>
+          <rect x={steps[4].x} y={steps[4].y - 40} width={steps[4].width} height={steps[4].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[4].x + steps[4].width! / 2} y={steps[4].y - 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">Backend APIs</text>
+          <text x={steps[4].x + steps[4].width! / 2} y={steps[4].y + 15} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">and Connecting</text>
+        </ClickableStep>
+        
+        {/* Sub-rectangles positioned next to main rectangle */}
+        {backendSubRects.map((subRect, index) => (
+          <g key={subRect.id}>
+            <DraggableSubRect
+              subRect={subRect}
+              stepKey={backendApisKey}
+              onEdit={() => handleAddSubRect(backendApisKey, subRect)}
+              onDelete={() => handleDeleteSubRect(backendApisKey, subRect.id)}
+            />
+            {/* Arrow to next sub-rectangle */}
+            {index < backendSubRects.length - 1 && (
+              <line
+                x1={subRect.x + 80}
+                y1={subRect.y + 50}
+                x2={backendSubRects[index + 1].x + 80}
+                y2={backendSubRects[index + 1].y}
+                stroke="#6366f1"
+                strokeWidth="2"
+                markerEnd="url(#arrowhead-flutter)"
+              />
+            )}
+          </g>
+        ))}
+        
+        {/* Arrow */}
+        <line x1={steps[4].x + steps[4].width! / 2} y1={steps[4].y + 40} x2={steps[4].x + steps[4].width! / 2} y2={steps[5].y - 35} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* ERD Database */}
+        <ClickableStep step={steps[5]} module={module}>
+          <rect x={steps[5].x} y={steps[5].y - 35} width={steps[5].width} height={steps[5].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[5].x + steps[5].width! / 2} y={steps[5].y + 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="14">ERD Database</text>
+        </ClickableStep>
+
+        {/* Arrow */}
+        <line x1={steps[5].x + steps[5].width! / 2} y1={steps[5].y + 35} x2={steps[5].x + steps[5].width! / 2} y2={steps[6].y - 35} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Frontend and Backend Collab */}
+        <ClickableStep step={steps[6]} module={module}>
+          <rect x={steps[6].x} y={steps[6].y - 35} width={steps[6].width} height={steps[6].height} fill="#e0e7ff" stroke="#6366f1" strokeWidth="2.5" rx="8" filter="url(#shadow)"/>
+          <text x={steps[6].x + steps[6].width! / 2} y={steps[6].y - 5} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">Frontend & Backend</text>
+          <text x={steps[6].x + steps[6].width! / 2} y={steps[6].y + 15} textAnchor="middle" fill="#1e40af" fontWeight="bold" fontSize="13">Collab</text>
+        </ClickableStep>
+
+        {/* Arrow */}
+        <line x1={steps[6].x + steps[6].width! / 2} y1={steps[6].y + 35} x2={steps[6].x + steps[6].width! / 2} y2={steps[7].y - 40} stroke="#6366f1" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+
+        {/* Decision: If okay? */}
+        <ClickableStep step={steps[7]} module={module}>
+          <path d={`M ${steps[7].x + steps[7].width! / 2} ${steps[7].y - 40} L ${steps[7].x + steps[7].width!} ${steps[7].y} L ${steps[7].x + steps[7].width! / 2} ${steps[7].y + 40} L ${steps[7].x} ${steps[7].y} Z`} fill="white" stroke="#6366f1" strokeWidth="2.5" filter="url(#shadow)"/>
+          <text x={steps[7].x + steps[7].width! / 2} y={steps[7].y - 5} textAnchor="middle" fill="#1e40af" fontSize="14" fontWeight="bold">If okay?</text>
+        </ClickableStep>
+
+        {/* Yes path */}
+        <line x1={steps[7].x + steps[7].width! / 2} y1={steps[7].y + 40} x2={steps[7].x + steps[7].width! / 2} y2={steps[8].y - 35} stroke="#22c55e" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+        <text x={steps[7].x + steps[7].width! / 2 + 20} y={steps[7].y + 60} fill="#22c55e" fontSize="13" fontWeight="bold">Yes</text>
+
+        {/* Version 1 */}
+        <ClickableStep step={steps[8]} module={module}>
+          <ellipse cx={steps[8].x + steps[8].width! / 2} cy={steps[8].y} rx={steps[8].width! / 2} ry="25" fill="#22c55e" stroke="#16a34a" strokeWidth="2.5" filter="url(#shadow)"/>
+          <text x={steps[8].x + steps[8].width! / 2} y={steps[8].y + 7} textAnchor="middle" fill="white" fontWeight="bold" fontSize="15">Version 1</text>
+        </ClickableStep>
+
+        {/* No path */}
+        <line x1={steps[7].x} y1={steps[7].y} x2={centerX - 250} y2={steps[7].y} stroke="#ef4444" strokeWidth="3" markerEnd="url(#arrowhead-flutter)"/>
+        <text x={centerX - 200} y={steps[7].y - 10} fill="#ef4444" fontSize="13" fontWeight="bold">No</text>
+        <ellipse cx={centerX - 250} cy={steps[7].y} rx="60" ry="25" fill="#fee2e2" stroke="#ef4444" strokeWidth="2.5" filter="url(#shadow)"/>
+        <text x={centerX - 250} y={steps[7].y + 7} textAnchor="middle" fill="#991b1b" fontSize="12" fontWeight="bold">Fix Issues</text>
+      </svg>
+    );
+  };
+
   const modules = [
     { id: 'main', name: '🏥 Main Workflow', component: MainFlow },
     { id: 'base', name: '1️⃣ Base Module', component: BaseModuleFlow },
@@ -1072,7 +1628,8 @@ const FlowchartDiagram = () => {
     { id: 'integration', name: '3️⃣ System Integration', component: IntegrationModuleFlow },
     { id: 'medical', name: '4️⃣ Medical Extensions', component: MedicalModuleFlow },
     { id: 'chatbot', name: '5️⃣ Chatbot Upgrade', component: ChatbotFlow },
-    { id: 'customization', name: '6️⃣ Clinic Customization', component: CustomizationFlow }
+    { id: 'customization', name: '6️⃣ Clinic Customization', component: CustomizationFlow },
+    { id: 'flutter', name: '📱 Flutter App', component: FlutterAppFlow }
   ];
 
   const CurrentFlow = modules.find(m => m.id === selectedModule)?.component || MainFlow;
@@ -1211,6 +1768,93 @@ const FlowchartDiagram = () => {
                     setEditingStep(null);
                     setDeadlineInput('');
                     setNotesInput('');
+                  }}
+                  className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Rectangle Modal */}
+        {editingSubRect && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-2xl max-w-md w-full p-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                {editingSubRect.subRect ? 'Edit' : 'Add'} Sub-Item
+              </h2>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Label
+                </label>
+                <input
+                  type="text"
+                  value={subRectLabel}
+                  onChange={(e) => setSubRectLabel(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Enter sub-item label..."
+                  autoFocus
+                />
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  📅 Deadline
+                </label>
+                <input
+                  type="date"
+                  value={subRectDeadline}
+                  onChange={(e) => setSubRectDeadline(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  📝 Notes
+                </label>
+                <textarea
+                  value={subRectNotes}
+                  onChange={(e) => setSubRectNotes(e.target.value)}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Add notes about this sub-item..."
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSaveSubRect}
+                  disabled={!subRectLabel.trim()}
+                  className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  Save
+                </button>
+                {editingSubRect.subRect && (
+                  <button
+                    onClick={() => {
+                      if (editingSubRect.subRect) {
+                        handleDeleteSubRect(editingSubRect.stepKey, editingSubRect.subRect.id);
+                      }
+                      setEditingSubRect(null);
+                      setSubRectLabel('');
+                      setSubRectDeadline('');
+                      setSubRectNotes('');
+                    }}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setEditingSubRect(null);
+                    setSubRectLabel('');
+                    setSubRectDeadline('');
+                    setSubRectNotes('');
                   }}
                   className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-400 transition-colors"
                 >
